@@ -1,0 +1,7 @@
+# Install dependencies listed in another file
+-r requirements.txt 
+
+# Testing libraries
+pytest
+pytest-asyncio 
+httpx
