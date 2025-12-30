@@ -2,15 +2,17 @@ import uuid
 from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Cookie, Response, BackgroundTasks
+from starlette.requests import Request as StarletteRequest
 from sqlalchemy.orm import Session
 
 from db.database import get_db, SessionLocal
 from models.story import Story, StoryNode
 from models.job import StoryJob
-from schemas.story import (CompleteStoryResponse, CompleteStoryNodeResponse, CreateStoryRequest
-                           )
 from schemas.job import StoryJobResponse
 from services.story_generator import StoryGenerator
+from core.rate_limiting import limiter
+from schemas.story import (
+    CompleteStoryResponse, CompleteStoryNodeResponse, CreateStoryRequest)
 
 router = APIRouter(
     prefix="/stories",
@@ -25,13 +27,14 @@ def get_session_id(session_id: Optional[str] = Cookie(None)):
 
 
 @router.post("/create", response_model=StoryJobResponse)
-def create_story(
-        request: CreateStoryRequest,
-        background_tasks: BackgroundTasks,
-        response: Response,
-        session_id: str = Depends(get_session_id),
-        db: Session = Depends(get_db)
-):
+@limiter.limit("5/minute")  # Limit to 5 requests per minute per IP
+def create_story(story_request_data: CreateStoryRequest,
+                 request: StarletteRequest,
+                 background_tasks: BackgroundTasks,
+                 response: Response,
+                 session_id: str = Depends(get_session_id),
+                 db: Session = Depends(get_db)
+                 ):
     response.set_cookie(key="session_id", value=session_id, httponly=True)
 
     job_id = str(uuid.uuid4())
@@ -39,7 +42,7 @@ def create_story(
     job = StoryJob(
         job_id=job_id,
         session_id=session_id,
-        theme=request.theme,
+        theme=story_request_data.theme,
         status="pending"
     )
     db.add(job)
@@ -48,7 +51,7 @@ def create_story(
     background_tasks.add_task(
         generate_story_task,
         job_id=job_id,
-        theme=request.theme,
+        theme=story_request_data.theme,
         session_id=session_id
     )
 
